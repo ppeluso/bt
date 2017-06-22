@@ -206,7 +206,7 @@ void DataFeed::query()
 	sql = sql + ";";
 	query_obj.query(sql);
 }
-int DataFeed::next()
+int DataFeed::step()
 {
 	return query_obj.tick_step(tick, symbol); 
 }
@@ -214,17 +214,49 @@ bool DataFeed::isEmpty()
 {
 	return !query_obj.query_check();
 }
+Tick DataFeed::getTick()
+{
+	return tick;
+}
+Tick* DataFeed::getTickPtr()
+{
+	return &tick;
+}
+void DataFeedHandler::addDataFeed(const std::string& symbol,  DataFeed* data_feed)
+{
+	map_handler.insert({ symbol, data_feed });
+}
+DataFeed* DataFeedHandler::getFeed(const std::string& symbol)
+{
+	return map_handler[symbol];
+}
+Position::Position(const std::string& symbol, int buy_sell, int quantity, DataFeed* data_feed) :
+	symbol(symbol),
+	buy_sell(buy_sell),
+	quantity(quantity),
+	data_feed(data_feed),
+	is_open(true)
+{
+	fill_tick = data_feed->getTick();
+	current_tick = data_feed->getTickPtr();
+}
+std::shared_ptr<Position> OrderHandler::newPostion(const std::string& symbol, int buy_sell, int quantity)
+{
+	return std::make_shared<Position>(symbol, buy_sell, quantity, (dfh.getFeed(symbol)));
+}
 int main()
 {
+
 	std::string filename = "test.db";
 	auto db = SQLiteDB(filename);
-
-		//std::cout<< query.double_step(0) << std::endl; 
 	DataFeed data(db, "SPY");
+	auto feed_handler = DataFeedHandler(); 
+	feed_handler.addDataFeed(static_cast<std::string>("SPY"), &data); 
+	std::cout<<feed_handler.getFeed("SPY");
 	data.query(); 
 	while(!data.isEmpty())
 	{
-		 data.next();
+		 data.step();
 		 std::cout << data.tick.symbol << " " << data. tick.price << " " << data.tick.dt << std::endl; 
 	}
 

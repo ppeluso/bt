@@ -2,6 +2,25 @@
 #include <iostream>
 #include <string>
 #include <memory> 
+#include <unordered_map>
+#include <utility>
+#include <algorithm>
+
+//class BacktestEngine
+//{
+//	Portfolio; 
+//	Order Handler:
+//};
+
+//class Portfolio
+//{
+//private:
+//	double capital; 
+//public:
+//
+//};
+
+
 
 class Tick
 {
@@ -57,8 +76,54 @@ public:
 	SQLiteQuery query_obj;
 	Tick tick;
 	std::string symbol;
-	DataFeed(const SQLiteDB& db, const std::string& symbol) : db(db), symbol(symbol) {query_obj.db = db;}
+	DataFeed(const SQLiteDB& db, const std::string& symbol) : db(db), query_obj(db), symbol(symbol) { }
 	void query();
-	int next();
+	int step();
 	bool isEmpty();
+	Tick getTick();
+	Tick* getTickPtr();
+};
+
+class DataFeedHandler
+{
+private:
+	std::unordered_map<std::string, DataFeed*> map_handler;
+public:
+	DataFeedHandler() {}
+	void addDataFeed(const std::string& symbol, DataFeed* data_feed);
+	DataFeed* getFeed(const std::string& symbol);
+
+};
+
+
+class Position
+{
+private:
+	std::string symbol;
+	int buy_sell;
+	int quantity;
+	Tick fill_tick;
+	Tick* current_tick; 
+	Tick close_tick;
+	DataFeed* data_feed;
+	bool is_open;
+public:
+	Position(const std::string& symbol, int buy_sell, int quantity, DataFeed* data_feed);
+	void closePosition() { close_tick = *current_tick; is_open = true; }
+	bool isOpen() { return is_open; }
+	
+};
+
+class OrderHandler
+{
+public:
+	DataFeedHandler dfh; 
+
+	OrderHandler(const DataFeedHandler& dfh) : dfh(dfh){}
+	std::shared_ptr<Position> newPostion(const std::string& symbol, int buy_sell, int quantity);
+};
+
+class PositionHandler
+{
+	
 };
