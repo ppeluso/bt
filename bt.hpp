@@ -1,6 +1,7 @@
 #include <sqlite3.h> 
 #include <iostream>
 #include <string>
+#include <vector>
 #include <memory> 
 #include <unordered_map>
 #include <utility>
@@ -8,19 +9,13 @@
 
 //class BacktestEngine
 //{
-//	Portfolio; 
-//	Order Handler:
+//	SQLiteDB db;
+//	DataFeedHandler data_feed_handler;
+//	std::vector<std::string> symbol_vec;
+//	BacktestEngine(const SQLiteDB& db, , const std::vector<std::string>& vec)
+//		: db(db)
+//		{}
 //};
-
-//class Portfolio
-//{
-//private:
-//	double capital; 
-//public:
-//
-//};
-
-
 
 class Tick
 {
@@ -84,46 +79,94 @@ public:
 	Tick* getTickPtr();
 };
 
+
+class Position
+{
+private:
+	Tick fill_tick;
+	Tick close_tick;
+	DataFeed* data_feed;
+	bool is_open;
+public:
+	Tick* current_tick;
+	std::string symbol;
+	int buy_sell;
+	int quantity;
+	Position(const std::string& symbol, int buy_sell, int quantity, DataFeed* data_feed);
+	void closePosition() { close_tick = *current_tick; is_open = false; }
+	bool isOpen() { return is_open; }
+	double currentPL() { return ((buy_sell *(current_tick->price - fill_tick.price))* quantity); }
+
+};
+
+
+class PositionNode
+{
+public:
+	std::shared_ptr<Position> pos;
+	PositionNode* prev;
+	PositionNode* next;
+
+	PositionNode(std::shared_ptr<Position> pos, PositionNode* prev, PositionNode* next) :
+		pos(pos),
+		prev(prev),
+		next(next) {}
+};
+
+class PositionList
+{
+public:
+	PositionNode* head;
+	PositionNode* tail;
+
+	PositionList() : head(nullptr), tail(nullptr) {}
+	void insertToTail(std::shared_ptr<Position> pos);
+	auto removeAll(const std::string& symbol);
+	auto loopPL();
+	~PositionList();
+
+};
+
 class DataFeedHandler
 {
 private:
 	std::unordered_map<std::string, DataFeed*> map_handler;
 public:
-	DataFeedHandler() {}
-	void addDataFeed(const std::string& symbol, DataFeed* data_feed);
+	SQLiteDB db;
+	std::vector<std::string> symbol_vec;
+	DataFeedHandler(const SQLiteDB& db, std::vector<std::string> symbol_vec);
 	DataFeed* getFeed(const std::string& symbol);
-
+	~DataFeedHandler();
+	void step();
+	void query();
 };
 
 
-class Position
+
+class PositionHandler
 {
-private:
-	std::string symbol;
-	int buy_sell;
-	int quantity;
-	Tick fill_tick;
-	Tick* current_tick; 
-	Tick close_tick;
-	DataFeed* data_feed;
-	bool is_open;
 public:
-	Position(const std::string& symbol, int buy_sell, int quantity, DataFeed* data_feed);
-	void closePosition() { close_tick = *current_tick; is_open = true; }
-	bool isOpen() { return is_open; }
-	
+	PositionList position_list;
+	PositionHandler() {};
 };
 
 class OrderHandler
 {
 public:
-	DataFeedHandler dfh; 
+	DataFeedHandler dfh;
 
-	OrderHandler(const DataFeedHandler& dfh) : dfh(dfh){}
+	OrderHandler(const DataFeedHandler& dfh) : dfh(dfh) {}
+	~OrderHandler() { std::cout << "del del" << std::endl; }
 	std::shared_ptr<Position> newPostion(const std::string& symbol, int buy_sell, int quantity);
 };
 
-class PositionHandler
+class Portfolio: public PositionHandler, public OrderHandler 
 {
+private:
+	double capital; 
+	std::vector<double> daily_pl; 
+public:
+	Portfolio(const DataFeedHandler& dfh, double capital) : OrderHandler(dfh), capital(capital) {}
+	auto addPosition(const std::string& symbol, int buy_sell, int quantity);
 	
 };

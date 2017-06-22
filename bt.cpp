@@ -222,13 +222,43 @@ Tick* DataFeed::getTickPtr()
 {
 	return &tick;
 }
-void DataFeedHandler::addDataFeed(const std::string& symbol,  DataFeed* data_feed)
-{
-	map_handler.insert({ symbol, data_feed });
-}
+
 DataFeed* DataFeedHandler::getFeed(const std::string& symbol)
 {
 	return map_handler[symbol];
+}
+DataFeedHandler::DataFeedHandler(const SQLiteDB& db, std::vector<std::string> symbol_vec) : db(db), symbol_vec(symbol_vec) 
+{
+	for (auto symbol : symbol_vec)
+	{
+		map_handler.insert({ symbol, new DataFeed(db, symbol)});
+	}
+}
+
+DataFeedHandler::~DataFeedHandler()
+{
+	//for (auto i : map_handler)
+	//{
+	//	std::cout << i.first << std::endl;
+	//	std::cout << "del" << std::endl;
+	//	delete i.second;
+
+	//}
+	std::cout << "deleteski" << std::endl; 
+	delete map_handler["SPY"];
+	map_handler["SPY"] = nullptr;
+	std::cout << "deleter";
+}
+
+void DataFeedHandler::step()
+{
+	for (auto i : map_handler)
+		i.second->step();
+}
+void DataFeedHandler::query()
+{
+	for (auto i : map_handler)
+		i.second->query();
 }
 Position::Position(const std::string& symbol, int buy_sell, int quantity, DataFeed* data_feed) :
 	symbol(symbol),
@@ -244,22 +274,147 @@ std::shared_ptr<Position> OrderHandler::newPostion(const std::string& symbol, in
 {
 	return std::make_shared<Position>(symbol, buy_sell, quantity, (dfh.getFeed(symbol)));
 }
+
+void PositionList::insertToTail(std::shared_ptr<Position> pos)
+{
+	if (head == nullptr && tail == nullptr)
+	{
+		head = tail = new PositionNode(pos, nullptr, nullptr);
+		return;
+	}
+	else
+	{
+		auto tmp = tail; 
+		tail = new PositionNode(pos, tmp, nullptr);
+		tmp->next = tail; 
+		return;
+	}
+}
+PositionList::~PositionList()
+{
+	if (head != nullptr && tail != nullptr)
+	{
+		auto tmp = head;
+			while (tmp != nullptr)
+			{
+				std::cout << "delete" << std::endl;
+				head = tmp;
+				tmp = tmp->next;
+				delete head; 
+
+			}
+	}
+
+}
+auto PositionList:: removeAll(const std::string& symbol)
+{
+	if (head == nullptr && tail == nullptr)
+		return;
+
+
+	auto tmp = head;
+	auto delete_tmp = head; 
+	while (tmp != nullptr)
+	{
+		if (tmp->pos->symbol == symbol)
+		{
+			if (tmp == head && tmp== tail)
+			{
+				head = nullptr; 
+				tail = nullptr;
+
+			}
+			else
+			{
+				if (tmp == head)
+				{
+					head = tmp->next;
+					head->prev = nullptr;
+				}
+ 
+				else if (tmp == tail)
+				{
+					tail = tmp->prev;
+					tail->next = nullptr; 
+
+				}
+				else
+				{
+					tmp->prev->next = tmp->next;
+					tmp->next->prev = tmp->prev;
+				}
+			}
+
+			delete_tmp = tmp;
+			tmp = tmp->next;
+			delete delete_tmp;
+		}
+		else 
+			tmp = tmp->next;
+	}
+	return;
+
+}
+
+auto PositionList::loopPL()
+{
+	if (head == nullptr)
+		return 0.0;
+	
+	auto tmp = head; 
+	auto sum = 0.0;
+	while (tmp != nullptr)
+	{
+		sum += tmp->pos->currentPL();
+		tmp = tmp->next;
+	}
+	return sum; 
+
+}
+auto Portfolio::addPosition(const std::string& symbol, int buy_sell, int quantity)
+{
+	position_list.insertToTail(newPostion(symbol, buy_sell, quantity));
+}
+
+//BacktestEngine::BacktestEngine(const SQLiteDB& db, const std::vector<std::string>& symbol_vec)
+//	: db(db), 
+//	symbol_vec(symbol_vec)
+//{
+//	for (auto i : symbol_vec)
+//	{
+//		data_feed_handler.addDataFeed(i, new )
+//	}
+//
+//}
 int main()
 {
 
 	std::string filename = "test.db";
 	auto db = SQLiteDB(filename);
 	DataFeed data(db, "SPY");
-	auto feed_handler = DataFeedHandler(); 
-	feed_handler.addDataFeed(static_cast<std::string>("SPY"), &data); 
-	std::cout<<feed_handler.getFeed("SPY");
-	data.query(); 
+	std::vector<std::string> symbol_vec = { "SPY" };
+	auto feed_handler = DataFeedHandler(db, symbol_vec);
+
+	feed_handler.query(); 
+	
+	auto order_handler = OrderHandler(feed_handler);
+	
+
+	auto position_list = PositionList(); 
+	feed_handler.step();
+	position_list.insertToTail(order_handler.newPostion("SPY", 1, 100));
+	position_list.insertToTail(order_handler.newPostion("SPY", 1, 100));
+	feed_handler.step();
+	std::cout << position_list.loopPL()<< std::endl;
+	position_list.removeAll("SPY");
+	data.query();
 	while(!data.isEmpty())
 	{
 		 data.step();
 		 std::cout << data.tick.symbol << " " << data. tick.price << " " << data.tick.dt << std::endl; 
 	}
-
+	
+	std::cout << "out" << std::endl;
 
 	return 0;
 }
