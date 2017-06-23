@@ -1,6 +1,6 @@
 #include "bt.hpp"
 #include <iostream>
-
+#include <memory> 
 static int callback(void *params, int argc, char **argv, char **azColName) {
    int i;
    for(i = 0; i<argc; i++) {
@@ -223,7 +223,7 @@ Tick* DataFeed::getTickPtr()
 	return &tick;
 }
 
-DataFeed* DataFeedHandler::getFeed(const std::string& symbol)
+std::shared_ptr<DataFeed> DataFeedHandler::getFeed(const std::string& symbol)
 {
 	return map_handler[symbol];
 }
@@ -231,24 +231,11 @@ DataFeedHandler::DataFeedHandler(const SQLiteDB& db, std::vector<std::string> sy
 {
 	for (auto symbol : symbol_vec)
 	{
-		map_handler.insert({ symbol, new DataFeed(db, symbol)});
+		map_handler.insert({ symbol, std::make_shared<DataFeed>(db, symbol)});
 	}
 }
 
-DataFeedHandler::~DataFeedHandler()
-{
-	//for (auto i : map_handler)
-	//{
-	//	std::cout << i.first << std::endl;
-	//	std::cout << "del" << std::endl;
-	//	delete i.second;
 
-	//}
-	std::cout << "deleteski" << std::endl; 
-	delete map_handler["SPY"];
-	map_handler["SPY"] = nullptr;
-	std::cout << "deleter";
-}
 
 void DataFeedHandler::step()
 {
@@ -260,7 +247,17 @@ void DataFeedHandler::query()
 	for (auto i : map_handler)
 		i.second->query();
 }
-Position::Position(const std::string& symbol, int buy_sell, int quantity, DataFeed* data_feed) :
+bool DataFeedHandler::isEmpty()
+{
+	for(auto i: map_handler)
+	{
+		if(i.second->isEmpty())
+			return true;
+	}
+
+	return false; 
+}
+Position::Position(const std::string& symbol, int buy_sell, int quantity, std::shared_ptr<DataFeed> data_feed) :
 	symbol(symbol),
 	buy_sell(buy_sell),
 	quantity(quantity),
@@ -279,7 +276,8 @@ void PositionList::insertToTail(std::shared_ptr<Position> pos)
 {
 	if (head == nullptr && tail == nullptr)
 	{
-		head = tail = new PositionNode(pos, nullptr, nullptr);
+		head =  new PositionNode(pos, nullptr, nullptr);
+		tail = head;
 		return;
 	}
 	else
@@ -297,7 +295,6 @@ PositionList::~PositionList()
 		auto tmp = head;
 			while (tmp != nullptr)
 			{
-				std::cout << "delete" << std::endl;
 				head = tmp;
 				tmp = tmp->next;
 				delete head; 
@@ -306,7 +303,7 @@ PositionList::~PositionList()
 	}
 
 }
-auto PositionList:: removeAll(const std::string& symbol)
+void PositionList::removeAll(const std::string& symbol)
 {
 	if (head == nullptr && tail == nullptr)
 		return;
@@ -360,6 +357,9 @@ auto PositionList::loopPL()
 {
 	if (head == nullptr)
 		return 0.0;
+
+
+
 	
 	auto tmp = head; 
 	auto sum = 0.0;
@@ -376,45 +376,29 @@ auto Portfolio::addPosition(const std::string& symbol, int buy_sell, int quantit
 	position_list.insertToTail(newPostion(symbol, buy_sell, quantity));
 }
 
-//BacktestEngine::BacktestEngine(const SQLiteDB& db, const std::vector<std::string>& symbol_vec)
-//	: db(db), 
-//	symbol_vec(symbol_vec)
-//{
-//	for (auto i : symbol_vec)
-//	{
-//		data_feed_handler.addDataFeed(i, new )
-//	}
-//
-//}
+void BacktestEngine::run()
+{
+	while(!portfolio->dfh.isEmpty())
+	{
+	std::cout << portfolio->position_list.loopPL()<< std::endl;
+	 step(); 
+	}
+}
 int main()
 {
 
+	
 	std::string filename = "test.db";
 	auto db = SQLiteDB(filename);
-	DataFeed data(db, "SPY");
 	std::vector<std::string> symbol_vec = { "SPY" };
 	auto feed_handler = DataFeedHandler(db, symbol_vec);
-
-	feed_handler.query(); 
-	
-	auto order_handler = OrderHandler(feed_handler);
-	
-
-	auto position_list = PositionList(); 
-	feed_handler.step();
-	position_list.insertToTail(order_handler.newPostion("SPY", 1, 100));
-	position_list.insertToTail(order_handler.newPostion("SPY", 1, 100));
-	feed_handler.step();
-	std::cout << position_list.loopPL()<< std::endl;
-	position_list.removeAll("SPY");
-	data.query();
-	while(!data.isEmpty())
-	{
-		 data.step();
-		 std::cout << data.tick.symbol << " " << data. tick.price << " " << data.tick.dt << std::endl; 
-	}
-	
-	std::cout << "out" << std::endl;
+	auto portfolio = Portfolio(feed_handler, 100000);
+	auto bt = BacktestEngine(&portfolio);
+	bt.query();
+	bt.step();
+	portfolio.addPosition("SPY", 1, 100);
+	portfolio.addPosition("SPY", 1, 100);
+	bt.run();
 
 	return 0;
 }

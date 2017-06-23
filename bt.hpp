@@ -7,15 +7,7 @@
 #include <utility>
 #include <algorithm>
 
-//class BacktestEngine
-//{
-//	SQLiteDB db;
-//	DataFeedHandler data_feed_handler;
-//	std::vector<std::string> symbol_vec;
-//	BacktestEngine(const SQLiteDB& db, , const std::vector<std::string>& vec)
-//		: db(db)
-//		{}
-//};
+
 
 class Tick
 {
@@ -85,14 +77,14 @@ class Position
 private:
 	Tick fill_tick;
 	Tick close_tick;
-	DataFeed* data_feed;
+	std::shared_ptr<DataFeed> data_feed;
 	bool is_open;
 public:
 	Tick* current_tick;
 	std::string symbol;
 	int buy_sell;
 	int quantity;
-	Position(const std::string& symbol, int buy_sell, int quantity, DataFeed* data_feed);
+	Position(const std::string& symbol, int buy_sell, int quantity, std::shared_ptr<DataFeed> data_feed);
 	void closePosition() { close_tick = *current_tick; is_open = false; }
 	bool isOpen() { return is_open; }
 	double currentPL() { return ((buy_sell *(current_tick->price - fill_tick.price))* quantity); }
@@ -121,7 +113,7 @@ public:
 
 	PositionList() : head(nullptr), tail(nullptr) {}
 	void insertToTail(std::shared_ptr<Position> pos);
-	auto removeAll(const std::string& symbol);
+	void removeAll(const std::string& symbol);
 	auto loopPL();
 	~PositionList();
 
@@ -130,15 +122,15 @@ public:
 class DataFeedHandler
 {
 private:
-	std::unordered_map<std::string, DataFeed*> map_handler;
+	std::unordered_map<std::string, std::shared_ptr<DataFeed>> map_handler;
 public:
 	SQLiteDB db;
 	std::vector<std::string> symbol_vec;
 	DataFeedHandler(const SQLiteDB& db, std::vector<std::string> symbol_vec);
-	DataFeed* getFeed(const std::string& symbol);
-	~DataFeedHandler();
+	std::shared_ptr<DataFeed> getFeed(const std::string& symbol);
 	void step();
 	void query();
+	bool isEmpty();
 };
 
 
@@ -156,7 +148,6 @@ public:
 	DataFeedHandler dfh;
 
 	OrderHandler(const DataFeedHandler& dfh) : dfh(dfh) {}
-	~OrderHandler() { std::cout << "del del" << std::endl; }
 	std::shared_ptr<Position> newPostion(const std::string& symbol, int buy_sell, int quantity);
 };
 
@@ -164,9 +155,27 @@ class Portfolio: public PositionHandler, public OrderHandler
 {
 private:
 	double capital; 
-	std::vector<double> daily_pl; 
+	std::vector<double> unit_pl; 
 public:
 	Portfolio(const DataFeedHandler& dfh, double capital) : OrderHandler(dfh), capital(capital) {}
 	auto addPosition(const std::string& symbol, int buy_sell, int quantity);
+	auto closeBySymbol(const std::string& symbol){position_list.removeAll(symbol);}
 	
 };
+
+class BacktestEngine
+{
+
+public: 
+	Portfolio* portfolio;
+	BacktestEngine(Portfolio* portfolio) : portfolio(portfolio) {}
+	void query(){portfolio->dfh.query();}
+	void step(){portfolio->dfh.step();}
+	void run();
+};
+
+class AbstractStrategy 
+{
+	void operator() () ;
+};
+
