@@ -1,7 +1,10 @@
 #include "bt.hpp"
 #include <iostream>
 #include <memory> 
-static int callback(void *params, int argc, char **argv, char **azColName) {
+
+
+static int callback(void *params, int argc, char **argv, char **azColName) 
+{
    int i;
    for(i = 0; i<argc; i++) {
       std::cout<< azColName[i] << argv[i] ? argv[i] : "NULL" ;
@@ -269,7 +272,7 @@ Position::Position(const std::string& symbol, int buy_sell, int quantity, std::s
 }
 std::shared_ptr<Position> OrderHandler::newPostion(const std::string& symbol, int buy_sell, int quantity)
 {
-	return std::make_shared<Position>(symbol, buy_sell, quantity, (dfh.getFeed(symbol)));
+	return std::make_shared<Position>(symbol, buy_sell, quantity, (dfh->getFeed(symbol)));
 }
 
 void PositionList::insertToTail(std::shared_ptr<Position> pos)
@@ -376,29 +379,44 @@ auto Portfolio::addPosition(const std::string& symbol, int buy_sell, int quantit
 	position_list.insertToTail(newPostion(symbol, buy_sell, quantity));
 }
 
-void BacktestEngine::run()
+void BacktestEngine::run(AbstractStrategy* fun)
 {
-	while(!portfolio->dfh.isEmpty())
+	query();
+	while(!portfolio->dfh->isEmpty())
 	{
-	std::cout << portfolio->position_list.loopPL()<< std::endl;
+		std::cout << portfolio->position_list.loopPL() << std::endl;
+		fun->operator()(portfolio);
 	 step(); 
+	}
+}
+
+void BuyStrategy::operator()(Portfolio* port)
+{
+	if ((port->dfh->getFeed("SPY")->getTick().price) > 200)
+	{
+		std::cout << (port->dfh->getFeed("SPY")->getTick().price)<< std::endl;
+		std::cout << "buy" << std::endl; 
+		port->addPosition("SPY", 1, 100);
 	}
 }
 int main()
 {
-
-	
-	std::string filename = "test.db";
-	auto db = SQLiteDB(filename);
-	std::vector<std::string> symbol_vec = { "SPY" };
-	auto feed_handler = DataFeedHandler(db, symbol_vec);
-	auto portfolio = Portfolio(feed_handler, 100000);
-	auto bt = BacktestEngine(&portfolio);
-	bt.query();
-	bt.step();
-	portfolio.addPosition("SPY", 1, 100);
-	portfolio.addPosition("SPY", 1, 100);
-	bt.run();
+	// filename for database
+	std::string filename = "test.db"; 
+	// create sqlite3 object
+	auto db = SQLiteDB(filename); 
+	// list of symbols that will be traded
+	std::vector<std::string> symbol_vec = { "SPY" }; 
+	// create feed handler with symbol list 
+	auto feed_handler = DataFeedHandler(db, symbol_vec); 
+	// create portfolio with feed and capital 
+	auto portfolio = Portfolio(&feed_handler, 100000); 
+	// create backtest engine with portfolio 
+	auto bt = BacktestEngine(&portfolio); 
+	// create strategy functor
+	auto strategy = BuyStrategy();  
+	// pass functor to BackTestEngine::run(Fun func) which runs strategy
+	bt.run(&strategy); 
 
 	return 0;
 }
