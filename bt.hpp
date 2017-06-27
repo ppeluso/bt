@@ -173,7 +173,7 @@ public:
 class PositionList
 {
 public:
-	// head of list
+	// head of list   
 	PositionNode* head;
 	// tail of list
 	PositionNode* tail;
