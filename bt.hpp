@@ -31,6 +31,19 @@ public:
 	}
 };
 
+class Order
+{
+public: 
+	std::string symbol; 
+	int quantity; 
+	int buy_sell; 
+	Order() : symbol("null"), quantity(0), buy_sell(0) {}
+	Order(const std::string& symbol, int quantity, int buy_sell) :
+	symbol(symbol), 
+	quantity(quantity),
+	buy_sell(buy_sell)
+	{}
+};
 
 // Creates instance of SQLite3 Database
 // Wrapper around SQLite3 C API
@@ -56,6 +69,8 @@ public:
 	void delete_table(const std::string& table_name);
 	// Takes full SQLite3 query for selecting data
 	void select(const std::string& sql);
+	template<typename T>
+	void writeVector(const std::vector<T>& vec, const std::string& table_name);
 
 };
 
@@ -86,6 +101,7 @@ class SQLiteQuery
 	auto step(int col);
 	// Steps to next row and sets members of tick to tick info of given symbol
 	auto tick_step(Tick& tick, const std::string& symbol);
+	auto order_step(Order & order, const std::string& symbol);
 };
 
 //DataFeed takes db and connects, then controls query for given symbol
@@ -103,8 +119,17 @@ public:
 	Tick tick;
 	// symbol that DataFeed is connected to
 	std::string symbol;
+	//start date for data 
+	std::string start_date;
+	//end date for data
+	std::string end_date;
 	// Constructor
-	DataFeed(const SQLiteDB& db, const std::string& symbol) : db(db), query_obj(db), symbol(symbol) { }
+    DataFeed(const SQLiteDB& db, const std::string& symbol, const std::string& start_date, const std::string& end_date) : 
+    db(db),
+    query_obj(db),
+    symbol(symbol),
+    start_date(start_date),
+    end_date(end_date) { }
 	// Runs query from query object, it will just make query to get all info for given symbol
 	// SELECT * FROM <symbol>;
 	void query();
@@ -116,6 +141,32 @@ public:
 	Tick getTick();
 	// returns pointer to tick
 	Tick* getTickPtr();
+};
+
+
+class OrderFeed
+{
+public: 
+	SQLiteDB db;
+	std::string strategy_table;
+	SQLiteQuery query_obj;
+	Order order;
+	std::string symbol;
+	std::string start_date;
+	std::string end_date;
+    OrderFeed(const SQLiteDB& db, const std::string strategy_table, const std::string& symbol, const std::string& start_date, const std::string& end_date) : 
+    db(db),
+    strategy_table(strategy_table),
+    query_obj(db),
+    symbol(symbol),
+    start_date(start_date),
+    end_date(end_date) { }
+    void query();
+    int step(); 
+    bool isHot();
+    bool isEmpty();
+    Order getOrder();
+    Order* getOrderPtr();
 };
 
 // Object to represent a single position in a stock/
@@ -201,7 +252,7 @@ public:
 	// vector of symbols 
 	std::vector<std::string> symbol_vec;
 	// Constructor
-	DataFeedHandler(const SQLiteDB& db, std::vector<std::string> symbol_vec);
+	DataFeedHandler(const SQLiteDB& db, std::vector<std::string> symbol_vec, const std::string& start_date, const std::string& end_date);
 	// Returns shared_ptr of datafeed for given symbol
 	std::shared_ptr<DataFeed> getFeed(const std::string& symbol);
 	// makes tick step for all data feeds in map
@@ -219,35 +270,44 @@ class PositionHandler
 public:
 	// Position list to hold positions
 	PositionList position_list;
+	// DataFeed handler for OrderHandler
+	DataFeedHandler* dfh;
 	// Default Constructor
-	PositionHandler() {};
+	PositionHandler(DataFeedHandler* dfh): dfh(dfh) {}
+	//Creates new position and returns pointer to this new position
+	std::shared_ptr<Position> newPostion(const std::string& symbol, int buy_sell, int quantity);
 };
 
 // Handler Class for orders
 // Main job is to create new positos
-class OrderHandler
+class OrderFeedHandler
 {
 public:
-	// DataFeed handler for OrderHandler
-	DataFeedHandler* dfh;
+	std::unordered_map<std::string, std::shared_ptr<OrderFeed>> map_handler;
+	SQLiteDB db;
+	std::vector<std::string> symbol_vec;
 	// Constructor
-	OrderHandler(DataFeedHandler* dfh) : dfh(dfh) {}
-	//Creates new position and returns pointer to this new position
-	std::shared_ptr<Position> newPostion(const std::string& symbol, int buy_sell, int quantity);
+	OrderFeedHandler(const SQLiteDB& db, const std::string& strategy_table, std::vector<std::string>& symbol_vec, const std::string& start_date, const std::string& end_date);
+	std::shared_ptr<OrderFeed> getFeed(const std::string& symbol);
+	void step();
+	void query();
+	bool isEmpty();
 };
+
 // Class to manage trades and keep track of pl
-class Portfolio: public PositionHandler, public OrderHandler 
+class Portfolio: public PositionHandler
 {
 private:
 	// Starting capital
 	double capital; 
 	// vector that stores cummulative pl for every step
-	std::vector<double> pl; 
 public:
+	std::vector<double> pl; 
 	// Consturctor
-	Portfolio( DataFeedHandler* dfh, double capital) : OrderHandler(dfh), capital(capital) {}
+	Portfolio( DataFeedHandler* dfh, double capital) : PositionHandler(dfh), capital(capital) {}
 	// Add position to portfolio
 	auto addPosition(const std::string& symbol, int buy_sell, int quantity);
+	auto addPosition(const Order& order);
 	// Close all positions with given symbol
 	auto closeBySymbol(const std::string& symbol){position_list.removeAll(symbol);}
 	
@@ -267,14 +327,18 @@ class BacktestEngine
 public: 
 	// pointer to portfolio passed in constructor
 	Portfolio* portfolio;
+	OrderFeedHandler* order_feed_handler;
 	// Constructor
-	BacktestEngine(Portfolio* portfolio) : portfolio(portfolio) {}
+	BacktestEngine(Portfolio* portfolio, OrderFeedHandler* order_feed_handler) :
+	portfolio(portfolio),
+	order_feed_handler(order_feed_handler)
+	{}
 	// Query for datafeed that porfolio is based on
 	void query(){portfolio->dfh->query();}
 	// Step for datafeed that portfolio is based on 
 	void step(){portfolio->dfh->step();}
 	// Runs backtest, takes strategy functor to run backtest
-	void run(AbstractStrategy* fun);
+	void run();
 };
 
 
@@ -286,3 +350,31 @@ public:
 	void operator()(Portfolio* portfolio);
 };
 
+
+class Option
+{
+public:
+	std::string symbol; 
+	std::string type; 
+	double strike;
+	int expiration;
+
+	Option(std::string symbol, std::string type, double strike, int expiration) :
+	symbol(symbol), 
+	type(type),
+	strike(strike)
+	expiration(expiration)
+	{}
+
+}
+
+class OptionChain
+{
+	
+}
+
+class TradeContainer
+{
+public:
+
+}

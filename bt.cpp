@@ -1,7 +1,7 @@
 #include "bt.hpp"
 #include <iostream>
 #include <memory> 
-
+#include <cmath>
 
 static int callback(void *params, int argc, char **argv, char **azColName) 
 {
@@ -132,7 +132,34 @@ void SQLiteDB::select(const std::string& sql)
 	}
 
 }
+template<typename T>
+void SQLiteDB::writeVector(const std::vector<T>& vec, const std::string& table_name)
+{
+    char *err_msg = 0;
+    int rc;
+    
+    std::string sql{"DROP TABLE IF EXISTS "};
 
+    sql = sql + table_name + ";";
+    const char * tmp_sql = sql.c_str();	
+    rc = sqlite3_exec(db, tmp_sql, 0, 0, &err_msg);
+
+    sql = "CREATE TABLE " ;
+    sql = sql + table_name + "(val REAL) ;";
+    tmp_sql = sql.c_str();	
+    rc = sqlite3_exec(db, tmp_sql, 0, 0, &err_msg);
+
+    for(auto &i : vec)
+    {
+    	sql = "INSERT INTO ";
+    	sql = sql + table_name + " VALUES(";
+    	sql = sql + std::to_string(i); 
+    	sql = sql +");";
+    	tmp_sql = sql.c_str();
+    	std::cout << tmp_sql << std::endl;	
+    	rc = sqlite3_exec(db, tmp_sql, 0, 0, &err_msg);
+    }
+}
 void SQLiteQuery::query(const std::string& sql)
 {	
 	int rc{0}; 
@@ -201,12 +228,37 @@ auto SQLiteQuery::tick_step(Tick& tick, const std::string& symbol)
 		return 1; 
 	}
 }
-
+auto SQLiteQuery::order_step(Order & order, const std::string& symbol)
+{
+	if(query_signal == SQLITE_ROW)
+	{
+	order.symbol = symbol; 
+	auto quant_and_sign = sqlite3_column_double(res, 0);
+	if (quant_and_sign == 0)
+		order.buy_sell = 0;
+	else if(quant_and_sign > 0)
+		order.buy_sell = 1;
+	else
+		order.buy_sell = -1;
+	order.quantity = abs(quant_and_sign); 
+	query_signal = sqlite3_step(res);
+	return 0;
+	}
+	else
+	{
+		std::cout << "NULL";
+		return 1; 
+	}
+}
 void DataFeed::query()
 {
 	std::string sql = " SELECT * FROM "; 
 	sql = sql + symbol; 
-	sql = sql + ";";
+	sql = sql + " where Date > ";
+	sql = sql + start_date + " and Date < "; 
+	sql = sql + end_date + " ;";
+
+	std::cout << sql << std::endl;
 	query_obj.query(sql);
 }
 int DataFeed::step()
@@ -226,20 +278,51 @@ Tick* DataFeed::getTickPtr()
 	return &tick;
 }
 
+void OrderFeed::query()
+{
+	std::string sql = "SELECT "; 
+	sql = sql + symbol + " FROM ";
+	sql = sql + strategy_table; 
+	//sql = sql + " where Date > ";
+	//sql = sql + start_date + " and Date < "; 
+	//sql = sql + end_date + " ;";
+	sql = sql + " ;";
+	query_obj.query(sql);	
+}
+int OrderFeed::step()
+{
+	return query_obj.order_step(order, symbol);
+}
+Order OrderFeed::getOrder()
+{
+	return order;
+}
+Order* OrderFeed::getOrderPtr()
+{
+	return &order;
+}
+bool OrderFeed::isHot()
+{
+	if(order.buy_sell == 1 || order.buy_sell == -1)
+		return true;
+	else 
+		return false;
+}
+bool OrderFeed::isEmpty()
+{
+	return !query_obj.query_check();
+}
 std::shared_ptr<DataFeed> DataFeedHandler::getFeed(const std::string& symbol)
 {
 	return map_handler[symbol];
 }
-DataFeedHandler::DataFeedHandler(const SQLiteDB& db, std::vector<std::string> symbol_vec) : db(db), symbol_vec(symbol_vec) 
+DataFeedHandler::DataFeedHandler(const SQLiteDB& db, std::vector<std::string> symbol_vec, const std::string& start_date, const std::string& end_date) : db(db), symbol_vec(symbol_vec) 
 {
 	for (auto symbol : symbol_vec)
 	{
-		map_handler.insert({ symbol, std::make_shared<DataFeed>(db, symbol)});
+		map_handler.insert({ symbol, std::make_shared<DataFeed>(db, symbol, start_date, end_date)});
 	}
 }
-
-
-
 void DataFeedHandler::step()
 {
 	for (auto i : map_handler)
@@ -260,6 +343,38 @@ bool DataFeedHandler::isEmpty()
 
 	return false; 
 }
+
+std::shared_ptr<OrderFeed> OrderFeedHandler::getFeed(const std::string& symbol)
+{
+	return map_handler[symbol];
+}
+OrderFeedHandler::OrderFeedHandler(const SQLiteDB& db, const std::string& strategy_table, std::vector<std::string>& symbol_vec, const std::string& start_date, const std::string& end_date) : db(db), symbol_vec(symbol_vec) 
+{
+	for (auto symbol : symbol_vec)
+	{
+		map_handler.insert({ symbol, std::make_shared<OrderFeed>(db, strategy_table, symbol, start_date, end_date)});
+	}
+}
+void OrderFeedHandler::step()
+{
+	for (auto i : map_handler)
+		i.second->step();
+}
+void OrderFeedHandler::query()
+{
+	for (auto i : map_handler)
+		i.second->query();
+}
+bool OrderFeedHandler::isEmpty()
+{
+	for(auto i: map_handler)
+	{
+		if(i.second->isEmpty())
+			return true;
+	}
+
+	return false; 
+}
 Position::Position(const std::string& symbol, int buy_sell, int quantity, std::shared_ptr<DataFeed> data_feed) :
 	symbol(symbol),
 	buy_sell(buy_sell),
@@ -270,7 +385,7 @@ Position::Position(const std::string& symbol, int buy_sell, int quantity, std::s
 	fill_tick = data_feed->getTick();
 	current_tick = data_feed->getTickPtr();
 }
-std::shared_ptr<Position> OrderHandler::newPostion(const std::string& symbol, int buy_sell, int quantity)
+std::shared_ptr<Position> PositionHandler::newPostion(const std::string& symbol, int buy_sell, int quantity)
 {
 	return std::make_shared<Position>(symbol, buy_sell, quantity, (dfh->getFeed(symbol)));
 }
@@ -379,14 +494,27 @@ auto Portfolio::addPosition(const std::string& symbol, int buy_sell, int quantit
 	position_list.insertToTail(newPostion(symbol, buy_sell, quantity));
 }
 
-void BacktestEngine::run(AbstractStrategy* fun)
+auto Portfolio::addPosition(const Order& order)
+{
+	addPosition(order.symbol, order.buy_sell, order.quantity);
+}
+void BacktestEngine::run()
 {
 	query();
+	order_feed_handler->query();
 	while(!portfolio->dfh->isEmpty())
 	{
-		std::cout << portfolio->position_list.loopPL() << std::endl;
-		fun->operator()(portfolio);
-	 step(); 
+	for (auto i : order_feed_handler->map_handler)
+		{
+			if(i.second->isHot())
+			{
+				std::cout << "buy" << std::endl; 
+				portfolio->addPosition(i.second->getOrder());
+			}
+		}
+	 portfolio->pl.push_back(portfolio->position_list.loopPL());
+	 step();
+	 order_feed_handler->step(); 
 	}
 }
 
@@ -399,24 +527,29 @@ void BuyStrategy::operator()(Portfolio* port)
 		port->addPosition("SPY", 1, 100);
 	}
 }
-int main()
+int main(int argc, char* argv [])
 {
+	std::vector<std::string> args(argv + 1, argv + argc);
 	// filename for database
 	std::string filename = "test.db"; 
 	// create sqlite3 object
 	auto db = SQLiteDB(filename); 
 	// list of symbols that will be traded
-	std::vector<std::string> symbol_vec = { "SPY" }; 
+	std::vector<std::string> symbol_vec = { "RDS_A", "RDS_B"}; 
 	// create feed handler with symbol list 
-	auto feed_handler = DataFeedHandler(db, symbol_vec); 
+	std::string start_date{"20070101"}; 
+	std::string end_date{"20150101"};
+	auto feed_handler = DataFeedHandler(db, args, start_date, end_date); 
 	// create portfolio with feed and capital 
 	auto portfolio = Portfolio(&feed_handler, 100000); 
+
+	auto order_feed_handler = OrderFeedHandler(db, "strat", symbol_vec, start_date, end_date);
 	// create backtest engine with portfolio 
-	auto bt = BacktestEngine(&portfolio); 
+	auto bt = BacktestEngine(&portfolio, &order_feed_handler); 
 	// create strategy functor
 	auto strategy = BuyStrategy();  
 	// pass functor to BackTestEngine::run(Fun func) which runs strategy
-	bt.run(&strategy); 
-
+	bt.run(); 
+	db.writeVector(portfolio.pl, "pl");
 	return 0;
 }

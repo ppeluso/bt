@@ -1,0 +1,44 @@
+#! /usr/local/bin/python2
+import pandas as pd
+import abc
+import sqlite3
+import numpy as np
+
+class AbstractStrategy:
+
+	__metaclass__ = abc.ABCMeta
+
+	def __init__(self, symbols, path_to_db, start_date, end_date):
+		self.symbols = symbols
+		self.data = {}
+		self.path_to_db = path_to_db 
+		self.signals = None
+		self.start_date = start_date
+		self.end_date = end_date
+
+		self.conn = sqlite3.connect(self.path_to_db)
+		for symbol in symbols:
+			self.data[symbol] = pd.read_sql_query("SELECT * FROM {0} WHERE Date > {1} and  Date < {2};".format(symbol, self.start_date, self.end_date), self.conn)
+		b = np.zeros(shape=(len(self.data["SPY"]),len(self.symbols)))
+		self.signals = pd.DataFrame(b, columns=symbols)
+
+	@abc.abstractmethod
+	def build_strategy(self):
+		pass
+        def to_db(self):
+            self.signals.to_sql(table_name, self.conn, if_exists='replace', index=False)
+
+class Strat(AbstractStrategy):
+
+	def build_strategy(self):
+                for i in range(len(self.data["SPY"])):
+                        if self.data["SPY"][i] > 200:
+                                self.signals["SPY"][i] = 1
+                        else:
+                                self.signals["SPY"][i] = 0
+
+if __name__ == '__main__':
+
+	s = Strat(["SPY", "TLT"], "test.db", "20110101", "20120101")
+	print (s.data["SPY"]
+
